@@ -1,34 +1,67 @@
-node {
- 	// Clean workspace before doing anything
-    deleteDir()
+def rtServer, buildInfo, rtMaven, xrayConfig, xrayResults
 
-    try {
-        stage ('Clone') {
-        	checkout scm
+pipeline {
+    agent { label 'master' }
+    tools {
+        jdk 'java' //Make sure this tool in configured in Manage Jenkins -> Global Tool Configuration
+        maven 'maven' //Make sure this tool in configured in Manage Jenkins -> Global Tool Configuration
+    }
+    parameters {
+        string (name: 'ART_URL', defaultValue: 'http://localhost:8082/artifactory', description: 'Artifactory where artifacts will be deployed/resolved')
+        string (name: 'ART_USER', defaultValue: 'admin', description: 'Artifactory user for deploy/resolve artifacts')
+        string (name: 'ART_PASSWORD', defaultValue: 'Password1', description: 'Artifactory password for deploy/resolve artifacts')
+        string (name: 'ART_RELEASE_REPO', defaultValue: 'libs-release', description: 'Virtual Repository where artifacts will be deployed/resolved (Releases)')
+        string (name: 'ART_SNAPSHOT_REPO', defaultValue: 'libs-snapshot', description: 'Virtual Repository where artifacts will be deployed/resolved (Snapshots)')
+        booleanParam (name: 'XRAY_SCAN', defaultValue: false, description: 'Scan artifacts using Xray')
+        booleanParam (name: 'FAIL_BUILD', defaultValue: false, description: 'Fail build if any violation is found in Xray')
+    }
+    stages {
+        stage('Init properties'){
+            steps {
+                script {
+                    rtServer = Artifactory.newServer url: "${params.ART_URL}", username: "${params.ART_USER}", password: "${params.ART_PASSWORD}"
+                    rtMaven = Artifactory.newMavenBuild()
+                    buildInfo = Artifactory.newBuildInfo()
+                    // These variables should be PARAMETERIZED
+                    rtMaven.deployer releaseRepo: 'libs-release', snapshotRepo: 'libs-snapshot', server: rtServer
+                    rtMaven.resolver releaseRepo: 'jcenter', snapshotRepo: 'jcenter', server: rtServer
+                }
+            }
         }
-        stage ('Build') {
-        	sh "echo 'shell scripts to build project...'"
+        stage('Checkout'){
+            steps {
+                git url: 'https://github.com/raja4dev/project-examples.git' //JFrog main project examples repository
+            }
         }
-        stage ('Tests') {
-	        parallel 'static': {
-	            sh "echo 'shell scripts to run static tests...'"
-	        },
-	        'unit': {
-	            sh "echo 'shell scripts to run unit tests...'"
-	        },
-	        'integration': {
-	            sh "echo 'shell scripts to run integration tests...'"
-	        }
+        stage('Install'){
+            steps {
+                script {
+                    rtMaven.run pom: 'maven-example/pom.xml', goals: 'clean install', buildInfo: buildInfo
+                }
+            }
         }
-      	stage ('Deploy') {
-            sh "echo 'shell scripts to deploy to server...'"
-      	}
-    } catch (err) {
-        currentBuild.result = 'FAILED'
-        throw err
+        stage('Publish'){
+            steps {
+                script {
+                    rtServer.publishBuildInfo buildInfo
+                }
+            }
+        }
+        stage('Xray Scan'){
+            when {
+                expression { return params.XRAY_SCAN }
+            }
+            steps {
+                script {
+                    xrayConfig = [
+                        'buildName'     : buildInfo.name,
+                        'buildNumber'    : buildInfo.number,
+                        'failBuild'     : "${params.FAIL_BUILD}".toBoolean()
+                    ]
+                    xrayResults = rtServer.xrayScan xrayConfig
+                    echo xrayResults as String
+                }
+            }
+        }
     }
 }
-
-
-
-
