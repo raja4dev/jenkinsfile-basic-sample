@@ -36,7 +36,7 @@ pipeline {
         stage('Install'){
             steps {
                 script {
-                    rtMaven.run pom: 'maven-example/pom.xml', goals: 'clean install', buildInfo: buildInfo
+                    rtMaven.run pom: 'maven-example/pom.xml', goals: 'clean -U install', buildInfo: buildInfo
                 }
             }
         }
