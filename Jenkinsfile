@@ -5,7 +5,7 @@ node {
     stage (‘Clone’) {
         git url: "https://github.com/raja4dev/javasample.git"
     }
-    stage (‘Artifactory configuration’) {
+    stage (‘Artifactory’) {
         // Obtain an Artifactory server instance, defined in Jenkins --> Manage:
         server = Artifactory.server ‘rajaweek5xray’
         rtMaven = Artifactory.newMavenBuild()
@@ -24,7 +24,7 @@ node {
     stage (‘Publish build info’) {
         server.publishBuildInfo buildInfo
     }
-    stage(‘XRay Scan’) {
+    stage(‘XRay’) {
         def scanConfig = [
             ‘buildName’ : buildInfo.name,
             ‘buildNumber’: buildInfo.number,
