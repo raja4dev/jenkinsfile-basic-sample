@@ -1,67 +1,50 @@
-def rtServer, buildInfo, rtMaven, xrayConfig, xrayResults
-
-pipeline {
-    agent { label 'master' }
-    tools {
-        jdk 'java' //Make sure this tool in configured in Manage Jenkins -> Global Tool Configuration
-        maven 'maven' //Make sure this tool in configured in Manage Jenkins -> Global Tool Configuration
+node {
+    def server
+    def buildInfo
+    def rtMaven
+    stage (‘Clone’) {
+        git url: ‘https://github.com/raja4dev/javasample.git’
     }
-    parameters {
-        string (name: 'ART_URL', defaultValue: 'http://localhost:8082/artifactory', description: 'Artifactory where artifacts will be deployed/resolved')
-        string (name: 'ART_USER', defaultValue: 'admin', description: 'Artifactory user for deploy/resolve artifacts')
-        string (name: 'ART_PASSWORD', defaultValue: 'Password1', description: 'Artifactory password for deploy/resolve artifacts')
-        string (name: 'ART_RELEASE_REPO', defaultValue: 'libs-release', description: 'Virtual Repository where artifacts will be deployed/resolved (Releases)')
-        string (name: 'ART_SNAPSHOT_REPO', defaultValue: 'libs-snapshot', description: 'Virtual Repository where artifacts will be deployed/resolved (Snapshots)')
-        booleanParam (name: 'XRAY_SCAN', defaultValue: false, description: 'Scan artifacts using Xray')
-        booleanParam (name: 'FAIL_BUILD', defaultValue: false, description: 'Fail build if any violation is found in Xray')
+    stage (‘Artifactory configuration’) {
+        // Obtain an Artifactory server instance, defined in Jenkins --> Manage:
+        server = Artifactory.server ‘rajaweek5xray’
+        rtMaven = Artifactory.newMavenBuild()
+        rtMaven.tool = ‘Maven’ // Tool name from Jenkins configuration
+        rtMaven.deployer releaseRepo: ‘libs-release-local’, snapshotRepo: ‘libs-snapshot-local’, server: server
+        rtMaven.resolver releaseRepo: ‘libs-release’, snapshotRepo: ‘libs-snapshot’, server: server
+        rtMaven.deployer.deployArtifacts = false // Disable artifacts deployment during Maven run
+        buildInfo = Artifactory.newBuildInfo()
     }
-    stages {
-        stage('Init properties'){
-            steps {
-                script {
-                    rtServer = Artifactory.newServer url: "${params.ART_URL}", username: "${params.ART_USER}", password: "${params.ART_PASSWORD}"
-                    rtMaven = Artifactory.newMavenBuild()
-                    buildInfo = Artifactory.newBuildInfo()
-                    // These variables should be PARAMETERIZED
-                    rtMaven.deployer releaseRepo: 'libs-release', snapshotRepo: 'libs-snapshot', server: rtServer
-                    rtMaven.resolver releaseRepo: 'jcenter', snapshotRepo: 'jcenter', server: rtServer
-                }
-            }
-        }
-        stage('Checkout'){
-            steps {
-                git url: 'https://github.com/raja4dev/project-examples.git' //JFrog main project examples repository
-            }
-        }
-        stage('Install'){
-            steps {
-                script {
-                    rtMaven.run pom: 'maven-example/pom.xml', goals: 'clean -U install', buildInfo: buildInfo
-                }
-            }
-        }
-        stage('Publish'){
-            steps {
-                script {
-                    rtServer.publishBuildInfo buildInfo
-                }
-            }
-        }
-        stage('Xray Scan'){
-            when {
-                expression { return params.XRAY_SCAN }
-            }
-            steps {
-                script {
-                    xrayConfig = [
-                        'buildName'     : buildInfo.name,
-                        'buildNumber'    : buildInfo.number,
-                        'failBuild'     : "${params.FAIL_BUILD}".toBoolean()
-                    ]
-                    xrayResults = rtServer.xrayScan xrayConfig
-                    echo xrayResults as String
-                }
-            }
-        }
+    stage (‘Install’) {
+        rtMaven.run pom: ‘MavenProject/pom.xml’, goals: ‘clean install’, buildInfo: buildInfo
+    }
+    stage (‘Deploy’) {
+        rtMaven.deployer.deployArtifacts buildInfo
+    }
+    stage (‘Publish build info’) {
+        server.publishBuildInfo buildInfo
+    }
+    stage(‘XRay Scan’) {
+        def scanConfig = [
+            ‘buildName’ : buildInfo.name,
+            ‘buildNumber’: buildInfo.number,
+            ‘failBuild’: false
+        ]
+        def scanResult = server.xrayScan scanConfig
+        echo scanResult as String
+   }
+    stage (‘Promotion’) {
+    promotionConfig=[
+        ‘buildName’ : buildInfo.name,
+        ‘buildNumber’: buildInfo.number,
+        ‘targetRepo’ :‘libs-release-local’,
+        ‘comment’ : ‘Promoting to Release’,
+        ‘sourceRepo’ : ‘libs-snapshot-local’,
+        ‘status’ : ‘Released’,
+        ‘includeDependencies’: true,
+        ‘failFast’ : false,
+        ‘copy’ : true
+        ]
+        server.promote promotionConfig
     }
 }
