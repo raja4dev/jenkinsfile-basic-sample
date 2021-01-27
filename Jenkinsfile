@@ -3,7 +3,7 @@ node {
     def buildInfo
     def rtMaven
     stage (‘Clone’) {
-        git url: ‘https://github.com/raja4dev/javasample.git’
+        git url: "https://github.com/raja4dev/javasample.git"
     }
     stage (‘Artifactory configuration’) {
         // Obtain an Artifactory server instance, defined in Jenkins --> Manage:
